@@ -10,4 +10,5 @@
 @interface SBControlCenterController: NSObject
 + (id)sharedInstance;
 - (BOOL)isVisible;
+-(BOOL)isDismissedOrDismissing;
 @end

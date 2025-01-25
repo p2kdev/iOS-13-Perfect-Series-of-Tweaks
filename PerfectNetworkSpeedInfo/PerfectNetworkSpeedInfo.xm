@@ -162,6 +162,7 @@ static BOOL networkSpeedEnabled = YES;
 			if (newSuperview) {
 				if (!self.networkSpeedLabel && !([newSuperview.superview.superview isKindOfClass:NSClassFromString(@"CCUIStatusBar")])) {
 					self.networkSpeedLabel = [[UILabel new] initWithFrame:CGRectZero];
+					[self.networkSpeedLabel setAdjustsFontSizeToFitWidth: YES];
 					[self addSubview: self.networkSpeedLabel];
 
 					self.networkSpeedLabelTimer = [NSTimer scheduledTimerWithTimeInterval: updateInterval target: self selector: @selector(updateNetworkSpeedLabel) userInfo: nil repeats: YES];
