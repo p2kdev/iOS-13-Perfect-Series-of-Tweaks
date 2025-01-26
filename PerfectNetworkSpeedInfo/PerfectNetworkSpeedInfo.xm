@@ -6,17 +6,21 @@ static BOOL networkSpeedEnabled = YES;
 
 %group NetworkSpeed
 
-	static const long KILOBITS = 1000;
-	static const long MEGABITS = 1000000;
-	static const long KILOBYTES = 1 << 10;
-	static const long MEGABYTES = 1 << 20;
+	#define KILOBITS 1000
+	#define MEGABITS 1000000
+	#define GIGABITS 1000000000
+	#define KILOBYTES (1 << 10)
+	#define MEGABYTES (1 << 20)
+	#define GIGABYTES (1 << 30)
 
-	static long oldUpSpeed = 0, oldDownSpeed = 0;
+	static uint64_t prevOutputBytes = 0, prevInputBytes = 0;
 	typedef struct
 	{
-		uint32_t inputBytes;
-		uint32_t outputBytes;
+		uint64_t inputBytes;
+		uint64_t outputBytes;
 	} UpDownBytes;
+
+	static NSString *networkSpeed;
 
 	static BOOL showUploadSpeed = YES;
 	static NSString *uploadPrefix = @"↑";
@@ -25,7 +29,6 @@ static BOOL networkSpeedEnabled = YES;
 	static NSString *separator = @" ";
 
 	static NSInteger dataUnit = 0;
-	static NSInteger minimumUnit = 0;
 
 	static double portraitX = 135;
 	static double portraitY = 1;
@@ -35,64 +38,68 @@ static BOOL networkSpeedEnabled = YES;
 	static double fontSize = 12.5;
 	static int fontWeight = 6;
 	static int alignment = 1;
-	static double updateInterval = 1;
 
 	// Got some help from similar network speed tweaks by julioverne & n3d1117
 
-	NSString* formatSpeed(long bytes) {
+	NSString* formatSpeed(long long bytes) {
 		if(dataUnit == 0) // BYTES
 		{
-			if(bytes < KILOBYTES)
-			{
-				if(minimumUnit == 0)
-					return [NSString stringWithFormat: @"%ldB/s", bytes];
-				else
-					return @"0KB/s";
-			}
-			else if(bytes < MEGABYTES) return [NSString stringWithFormat: @"%.0fKB/s", (double)bytes / KILOBYTES];
-			else return [NSString stringWithFormat: @"%.2fMB/s", (double)bytes / MEGABYTES];
+			if (bytes < KILOBYTES)
+				return @"0 B/s";
+			else if (bytes < MEGABYTES) 
+				return [NSString stringWithFormat: @"%.0f KB/s", (double)bytes / KILOBYTES];
+			else if (bytes < GIGABYTES) 
+				return [NSString stringWithFormat: @"%.2f MB/s", (double)bytes / MEGABYTES];
+			else 
+				return [NSString stringWithFormat: @"%.2f GB/s", (double)bytes / GIGABYTES];
 		}
 		else // BITS
 		{
-			if(bytes < KILOBITS)
-			{
-				if(minimumUnit == 0)
-					return [NSString stringWithFormat: @"%ldb/s", bytes];
-				else
-					return @"0Kb/s";
-			}
-			else if(bytes < MEGABITS) return [NSString stringWithFormat: @"%.0fKb/s", (double)bytes / KILOBITS];
-			else return [NSString stringWithFormat: @"%.2fMb/s", (double)bytes / MEGABITS];
+			if (bytes < KILOBITS)
+				return @"0 b/s";
+			else if (bytes < MEGABITS) 
+				return [NSString stringWithFormat: @"%.0f Kb/s", (double)bytes / KILOBITS];
+			else if (bytes < GIGABITS) 
+				return [NSString stringWithFormat: @"%.2f Mb/s", (double)bytes / MEGABITS];
+			else 
+				return [NSString stringWithFormat: @"%.2f Gb/s", (double)bytes / GIGABITS];
 		}
 	}
 
-	UpDownBytes getUpDownBytes() {
+	static UpDownBytes getUpDownBytes()
+	{
 		struct ifaddrs *ifa_list = 0, *ifa;
 		UpDownBytes upDownBytes;
 		upDownBytes.inputBytes = 0;
 		upDownBytes.outputBytes = 0;
 		
-		if((getifaddrs(&ifa_list) < 0) || !ifa_list || ifa_list == 0)
-			return upDownBytes;
+		if (getifaddrs(&ifa_list) == -1) return upDownBytes;
 
-		for(ifa = ifa_list; ifa; ifa = ifa->ifa_next)
+		for (ifa = ifa_list; ifa; ifa = ifa->ifa_next)
 		{
-			if(ifa->ifa_addr == NULL
-			|| AF_LINK != ifa->ifa_addr->sa_family
-			|| (!(ifa->ifa_flags & IFF_UP) && !(ifa->ifa_flags & IFF_RUNNING))
-			|| ifa->ifa_data == NULL || ifa->ifa_data == 0
-			|| strstr(ifa->ifa_name, "lo0")
-			|| strstr(ifa->ifa_name, "utun"))
+			/* Skip invalid interfaces */
+			if (ifa->ifa_name == NULL || ifa->ifa_addr == NULL || ifa->ifa_data == NULL)
+				continue;
+			
+			/* Skip interfaces that are not link level interfaces */
+			if (AF_LINK != ifa->ifa_addr->sa_family)
+				continue;
+
+			/* Skip interfaces that are not up or running */
+			if (!(ifa->ifa_flags & IFF_UP) && !(ifa->ifa_flags & IFF_RUNNING))
+				continue;
+			
+			/* Skip interfaces that are not ethernet or cellular */
+			if (strncmp(ifa->ifa_name, "en", 2) && strncmp(ifa->ifa_name, "pdp_ip", 6))
 				continue;
 			
 			struct if_data *if_data = (struct if_data *)ifa->ifa_data;
-
+			
 			upDownBytes.inputBytes += if_data->ifi_ibytes;
 			upDownBytes.outputBytes += if_data->ifi_obytes;
 		}
-		if(ifa_list)
-			freeifaddrs(ifa_list);
-
+		
+		freeifaddrs(ifa_list);
 		return upDownBytes;
 	}
 
@@ -100,21 +107,26 @@ static BOOL networkSpeedEnabled = YES;
 		NSMutableString* mutableString = [[NSMutableString alloc] init];
 		
 		UpDownBytes upDownBytes = getUpDownBytes();
-		long upDiff = (upDownBytes.outputBytes - oldUpSpeed) / updateInterval;
-		long downDiff = (upDownBytes.inputBytes - oldDownSpeed) / updateInterval;
-		oldUpSpeed = upDownBytes.outputBytes;
-		oldDownSpeed = upDownBytes.inputBytes;
+		uint64_t upDiff;
+		uint64_t downDiff;
+
+		if (upDownBytes.outputBytes > prevOutputBytes)
+			upDiff = upDownBytes.outputBytes - prevOutputBytes;
+		else
+			upDiff = 0;
+		
+		if (upDownBytes.inputBytes > prevInputBytes)
+			downDiff = upDownBytes.inputBytes - prevInputBytes;
+		else
+			downDiff = 0;
+
+		prevOutputBytes = upDownBytes.outputBytes;
+		prevInputBytes = upDownBytes.inputBytes;
 
 		if(dataUnit == 1) // BITS
 		{
 			upDiff *= 8;
 			downDiff *= 8;
-		}
-
-		if(upDiff > 50 * MEGABYTES && downDiff > 50 * MEGABYTES)
-		{
-			upDiff = 0;
-			downDiff = 0;
 		}
 
 		if(showUploadSpeed) [mutableString appendString: [NSString stringWithFormat: @"%@%@", uploadPrefix, formatSpeed(upDiff)]];
@@ -140,134 +152,156 @@ static BOOL networkSpeedEnabled = YES;
 			return UIFontWeightBold;
 	}	
 
+	%hook SBBacklightController
+
+		-(void)_notifyObserversWillAnimateToFactor:(float)arg1 source:(long long)arg2 {
+			if (arg1 == 0)
+				[[NSNotificationCenter defaultCenter] postNotificationName:@"stopNetworkSpeedTimer" object:nil];
+			else
+				[[NSNotificationCenter defaultCenter] postNotificationName:@"createNetworkSpeedTimer" object:nil];
+			%orig;
+		}
+
+	%end	
+
 	%hook _UIStatusBar
 
-		-(void)setAlpha:(CGFloat)arg1 forPartWithIdentifier:(id)arg2 {
-			%orig;
-			NSLog(@"KPD %f %@",arg1,arg2);
-		}
-	
-	
-	%end
-
-	%hook _UIStatusBarForegroundView
-
 		%property (nonatomic, retain) UILabel *networkSpeedLabel;
-		%property (nonatomic, retain) NSTimer *networkSpeedLabelTimer;
 
-		- (void)willMoveToSuperview:(UIView *)newSuperview
-		{
-			%orig;
+		-(UIView *)foregroundView {
+			UIView *foregroundView = %orig;
 
-			if (newSuperview) {
-				if (!self.networkSpeedLabel && !([newSuperview.superview.superview isKindOfClass:NSClassFromString(@"CCUIStatusBar")])) {
-					self.networkSpeedLabel = [[UILabel new] initWithFrame:CGRectZero];
-					[self.networkSpeedLabel setAdjustsFontSizeToFitWidth: YES];
-					[self addSubview: self.networkSpeedLabel];
+			if (!self.networkSpeedLabel) {
+				self.networkSpeedLabel = [[UILabel new] initWithFrame:CGRectZero];
+				[self.networkSpeedLabel setAdjustsFontSizeToFitWidth: YES];
+				[foregroundView insertSubview:self.networkSpeedLabel atIndex:1];
 
-					self.networkSpeedLabelTimer = [NSTimer scheduledTimerWithTimeInterval: updateInterval target: self selector: @selector(updateNetworkSpeedLabel) userInfo: nil repeats: YES];
-					return;
-				}
+				[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateNetworkSpeedText) name:@"updateNetworkSpeedText" object:nil];
 			}
 
-			if (self.networkSpeedLabelTimer) {
-				[self.networkSpeedLabelTimer invalidate];
-				self.networkSpeedLabelTimer = nil;
-			}
-
-			if (self.networkSpeedLabel) {
-				[self.networkSpeedLabel removeFromSuperview];
-				self.networkSpeedLabel = nil;
-			}						
+			return foregroundView;					
 		}
+
+		-(void)dealloc {
+			[[NSNotificationCenter defaultCenter] removeObserver:self];
+			%orig;
+		}				
 
 		%new
-		- (void)updateNetworkSpeedLabel {
+		- (void)updateNetworkSpeedText {
 			if(self.networkSpeedLabel)
 			{
-				if ([[%c(SBControlCenterController) sharedInstance] isVisible])
+				self.networkSpeedLabel.frame = CGRectMake(portraitX,portraitY,width,height);
+				[self.networkSpeedLabel setText: networkSpeed];							
+				[self.networkSpeedLabel setFont: [UIFont systemFontOfSize: fontSize weight: getFontWeight(fontWeight)]];
+				[self.networkSpeedLabel setTextAlignment: alignment];
+				if ([self.superview.superview isKindOfClass:NSClassFromString(@"CCUIStatusBar")])
 					self.networkSpeedLabel.hidden = YES;
 				else
 					self.networkSpeedLabel.hidden = NO;
-
-				self.networkSpeedLabel.frame = CGRectMake(portraitX,portraitY,width,height);
-				NSString *speed = formattedString();
-				[self.networkSpeedLabel setText: speed];							
-				[self.networkSpeedLabel setFont: [UIFont systemFontOfSize: fontSize weight: getFontWeight(fontWeight)]];
-				[self.networkSpeedLabel setTextAlignment: alignment];				
 			}
 		}	
 	%end
 
-	static void settingsChanged() {
-		static CFStringRef prefsKey = CFSTR("com.johnzaro.networkspeed13prefs");
-		CFPreferencesAppSynchronize(prefsKey);   
+	static NSTimer *networkSpeedTimer = nil;
 
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"enabled", prefsKey))) {
-			networkSpeedEnabled = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"enabled", prefsKey)) boolValue];
+	%hook SpringBoard
+
+		-(void)applicationDidFinishLaunching:(id)application {
+			%orig;			
+			[self startNetworkSpeedTimer];
+			[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(startNetworkSpeedTimer) name:@"startNetworkSpeedTimer" object:nil];			
+			[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(stopNetworkSpeedTimer) name:@"stopNetworkSpeedTimer" object:nil];			
 		}
 
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showUploadSpeed", prefsKey))) {
-			showUploadSpeed = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showUploadSpeed", prefsKey)) boolValue];
-		}
+		%new
+			-(void)startNetworkSpeedTimer {
+				if (networkSpeedTimer) {
+					[self stopNetworkSpeedTimer];
+				}
 
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"uploadPrefix", prefsKey))) {
-			uploadPrefix = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"uploadPrefix", prefsKey)) stringValue];
-		}	
+				networkSpeedTimer = [NSTimer scheduledTimerWithTimeInterval: 1.0 target: self selector: @selector(updateNetworkSpeed) userInfo: nil repeats: YES];				
+			}
 
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showDownloadSpeed", prefsKey))) {
-			showDownloadSpeed = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showDownloadSpeed", prefsKey)) boolValue];
-		}		
+		%new
+			-(void)stopNetworkSpeedTimer {
+				if (networkSpeedTimer) {
+					[networkSpeedTimer invalidate];
+					networkSpeedTimer = nil;
+				}				
+			}			
 
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"downloadPrefix", prefsKey))) {
-			downloadPrefix = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"downloadPrefix", prefsKey)) stringValue];
-		}
+		%new
+			-(void)updateNetworkSpeed {
+				dispatch_async(dispatch_get_main_queue(), ^{
+					networkSpeed = formattedString();
+					[[NSNotificationCenter defaultCenter] postNotificationName:@"updateNetworkSpeedText" object:nil];
+				});				
+			}			
+	%end
 
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"separator", prefsKey))) {
-			separator = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"separator", prefsKey)) stringValue];
-		}	
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"dataUnit", prefsKey))) {
-			dataUnit = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"dataUnit", prefsKey)) intValue];
-		}
-		
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"minimumUnit", prefsKey))) {
-			minimumUnit = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"minimumUnit", prefsKey)) intValue];
-		}
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitX", prefsKey))) {
-			portraitX = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitX", prefsKey)) doubleValue];
-		}	
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitY", prefsKey))) {
-			portraitY = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitY", prefsKey)) doubleValue];
-		}
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"width", prefsKey))) {
-			width = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"width", prefsKey)) doubleValue];
-		}	
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"height", prefsKey))) {
-			height = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"height", prefsKey)) doubleValue];
-		}	
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontSize", prefsKey))) {
-			fontSize = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontSize", prefsKey)) doubleValue];
-		}
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontWeight", prefsKey))) {
-			fontWeight = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontWeight", prefsKey)) intValue];
-		}	
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"alignment", prefsKey))) {
-			alignment = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"alignment", prefsKey)) intValue];
-		}
-
-		if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"updateInterval", prefsKey))) {
-			updateInterval = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"updateInterval", prefsKey)) intValue];
-		}					
-	}
 %end
+
+static void settingsChanged() {
+	static CFStringRef prefsKey = CFSTR("com.johnzaro.networkspeed13prefs");
+	CFPreferencesAppSynchronize(prefsKey);   
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"enabled", prefsKey))) {
+		networkSpeedEnabled = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"enabled", prefsKey)) boolValue];
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showUploadSpeed", prefsKey))) {
+		showUploadSpeed = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showUploadSpeed", prefsKey)) boolValue];
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"uploadPrefix", prefsKey))) {
+		uploadPrefix = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"uploadPrefix", prefsKey)) stringValue];
+	}	
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showDownloadSpeed", prefsKey))) {
+		showDownloadSpeed = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showDownloadSpeed", prefsKey)) boolValue];
+	}		
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"downloadPrefix", prefsKey))) {
+		downloadPrefix = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"downloadPrefix", prefsKey)) stringValue];
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"separator", prefsKey))) {
+		separator = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"separator", prefsKey)) stringValue];
+	}	
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"dataUnit", prefsKey))) {
+		dataUnit = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"dataUnit", prefsKey)) intValue];
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitX", prefsKey))) {
+		portraitX = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitX", prefsKey)) doubleValue];
+	}	
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitY", prefsKey))) {
+		portraitY = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitY", prefsKey)) doubleValue];
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"width", prefsKey))) {
+		width = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"width", prefsKey)) doubleValue];
+	}	
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"height", prefsKey))) {
+		height = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"height", prefsKey)) doubleValue];
+	}	
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontSize", prefsKey))) {
+		fontSize = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontSize", prefsKey)) doubleValue];
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontWeight", prefsKey))) {
+		fontWeight = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontWeight", prefsKey)) intValue];
+	}	
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"alignment", prefsKey))) {
+		alignment = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"alignment", prefsKey)) intValue];
+	}				
+}
 
 %ctor {
 	settingsChanged();
