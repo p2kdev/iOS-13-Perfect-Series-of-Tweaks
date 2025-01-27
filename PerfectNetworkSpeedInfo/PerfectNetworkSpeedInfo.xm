@@ -158,7 +158,7 @@ static BOOL networkSpeedEnabled = YES;
 			if (arg1 == 0)
 				[[NSNotificationCenter defaultCenter] postNotificationName:@"stopNetworkSpeedTimer" object:nil];
 			else
-				[[NSNotificationCenter defaultCenter] postNotificationName:@"createNetworkSpeedTimer" object:nil];
+				[[NSNotificationCenter defaultCenter] postNotificationName:@"startNetworkSpeedTimer" object:nil];
 			%orig;
 		}
 
