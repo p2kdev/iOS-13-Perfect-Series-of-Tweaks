@@ -102,6 +102,22 @@
 			<key>PostNotification</key>
 			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
 		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.johnzaro.networkspeed13prefs</string>
+			<key>key</key>
+			<string>showUploadSpeedFirst</string>
+			<key>label</key>
+			<string>Show Upload Speed first</string>
+			<key>PostNotification</key>
+			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
+		</dict>	
+
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
@@ -130,6 +146,21 @@
 			<key>PostNotification</key>
 			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
 		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.johnzaro.networkspeed13prefs</string>
+			<key>key</key>
+			<string>showPostfix</string>
+			<key>label</key>
+			<string>Show per second postfix</string>
+			<key>PostNotification</key>
+			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
+		</dict>		
 
 		<dict>
 			<key>cell</key>
@@ -208,6 +239,21 @@
 			<key>PostNotification</key>
 			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
 		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.johnzaro.networkspeed13prefs</string>
+			<key>key</key>
+			<string>adjustFontSizeToFit</string>
+			<key>label</key>
+			<string>Adjust Font size to fit Width</string>
+			<key>PostNotification</key>
+			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
+		</dict>			
 
 	
 		<dict>
@@ -288,7 +334,7 @@
 			</array>
 			<key>PostNotification</key>
 			<string>com.johnzaro.networkspeed13prefs/ReloadPrefs</string>
-		</dict>	
+		</dict>		
 
 		<dict>
         	<key>cell</key>

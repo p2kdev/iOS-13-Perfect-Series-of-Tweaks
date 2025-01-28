@@ -27,8 +27,10 @@ static BOOL networkSpeedEnabled = YES;
 	static BOOL showDownloadSpeed = YES;
 	static NSString *downloadPrefix = @"↓";
 	static NSString *separator = @" ";
+	static BOOL showUploadSpeedFirst = YES;
 
 	static NSInteger dataUnit = 0;
+	static BOOL showPostfix = YES;
 
 	static double portraitX = 135;
 	static double portraitY = 1;
@@ -36,6 +38,7 @@ static BOOL networkSpeedEnabled = YES;
 	static double width = 120;
 	static double height = 13;
 	static double fontSize = 12.5;
+	static bool adjustFontSizeToFit = YES;
 	static int fontWeight = 6;
 	static int alignment = 1;
 
@@ -45,24 +48,24 @@ static BOOL networkSpeedEnabled = YES;
 		if(dataUnit == 0) // BYTES
 		{
 			if (bytes < KILOBYTES)
-				return @"0 B/s";
+				return @"0 KB";
 			else if (bytes < MEGABYTES) 
-				return [NSString stringWithFormat: @"%.0f KB/s", (double)bytes / KILOBYTES];
+				return [NSString stringWithFormat: @"%.0f KB", (double)bytes / KILOBYTES];
 			else if (bytes < GIGABYTES) 
-				return [NSString stringWithFormat: @"%.2f MB/s", (double)bytes / MEGABYTES];
+				return [NSString stringWithFormat: @"%.2f MB", (double)bytes / MEGABYTES];
 			else 
-				return [NSString stringWithFormat: @"%.2f GB/s", (double)bytes / GIGABYTES];
+				return [NSString stringWithFormat: @"%.2f GB", (double)bytes / GIGABYTES];
 		}
 		else // BITS
 		{
 			if (bytes < KILOBITS)
-				return @"0 b/s";
+				return @"0 kb";
 			else if (bytes < MEGABITS) 
-				return [NSString stringWithFormat: @"%.0f Kb/s", (double)bytes / KILOBITS];
+				return [NSString stringWithFormat: @"%.0f Kb", (double)bytes / KILOBITS];
 			else if (bytes < GIGABITS) 
-				return [NSString stringWithFormat: @"%.2f Mb/s", (double)bytes / MEGABITS];
+				return [NSString stringWithFormat: @"%.2f Mb", (double)bytes / MEGABITS];
 			else 
-				return [NSString stringWithFormat: @"%.2f Gb/s", (double)bytes / GIGABITS];
+				return [NSString stringWithFormat: @"%.2f Gb", (double)bytes / GIGABITS];
 		}
 	}
 
@@ -129,13 +132,22 @@ static BOOL networkSpeedEnabled = YES;
 			downDiff *= 8;
 		}
 
-		if(showUploadSpeed) [mutableString appendString: [NSString stringWithFormat: @"%@%@", uploadPrefix, formatSpeed(upDiff)]];
-		if(showDownloadSpeed)
-		{
-			if([mutableString length] > 0)
-				[mutableString appendString: separator];
+		NSString *uploadSpeed = [NSString stringWithFormat: @"%@%@%@", uploadPrefix, formatSpeed(upDiff),showPostfix ? @"/s" : @""];
+		NSString *downloadSpeed = [NSString stringWithFormat: @"%@%@%@", downloadPrefix, formatSpeed(downDiff),showPostfix ? @"/s" : @""];
 
-			[mutableString appendString: [NSString stringWithFormat: @"%@%@", downloadPrefix, formatSpeed(downDiff)]];
+		if (showUploadSpeedFirst) {
+			if (showUploadSpeed)
+				[mutableString appendString:uploadSpeed];
+
+			if (showDownloadSpeed)
+				[mutableString appendString:[NSString stringWithFormat:@"%@%@",separator,downloadSpeed]];
+		}
+		else {
+			if (showDownloadSpeed)
+				[mutableString appendString:downloadSpeed];
+
+			if (showUploadSpeed)
+				[mutableString appendString:[NSString stringWithFormat:@"%@%@",separator,uploadSpeed]];
 		}
 		
 		return [mutableString copy];
@@ -173,7 +185,6 @@ static BOOL networkSpeedEnabled = YES;
 
 			if (!self.networkSpeedLabel) {
 				self.networkSpeedLabel = [[UILabel new] initWithFrame:CGRectZero];
-				[self.networkSpeedLabel setAdjustsFontSizeToFitWidth: YES];
 				[foregroundView insertSubview:self.networkSpeedLabel atIndex:1];
 
 				[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateNetworkSpeedText) name:@"updateNetworkSpeedText" object:nil];
@@ -192,6 +203,7 @@ static BOOL networkSpeedEnabled = YES;
 			if(self.networkSpeedLabel)
 			{
 				self.networkSpeedLabel.frame = CGRectMake(portraitX,portraitY,width,height);
+				[self.networkSpeedLabel setAdjustsFontSizeToFitWidth: adjustFontSizeToFit];
 				[self.networkSpeedLabel setText: networkSpeed];							
 				[self.networkSpeedLabel setFont: [UIFont systemFontOfSize: fontSize weight: getFontWeight(fontWeight)]];
 				[self.networkSpeedLabel setTextAlignment: alignment];
@@ -268,11 +280,19 @@ static void settingsChanged() {
 
 	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"separator", prefsKey))) {
 		separator = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"separator", prefsKey)) stringValue];
-	}	
+	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showUploadSpeedFirst", prefsKey))) {
+		showUploadSpeedFirst = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showUploadSpeedFirst", prefsKey)) boolValue];
+	}		
 
 	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"dataUnit", prefsKey))) {
 		dataUnit = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"dataUnit", prefsKey)) intValue];
 	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showPostfix", prefsKey))) {
+		showPostfix = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"showPostfix", prefsKey)) boolValue];
+	}	
 
 	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitX", prefsKey))) {
 		portraitX = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"portraitX", prefsKey)) doubleValue];
@@ -293,6 +313,10 @@ static void settingsChanged() {
 	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontSize", prefsKey))) {
 		fontSize = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontSize", prefsKey)) doubleValue];
 	}
+
+	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"adjustFontSizeToFit", prefsKey))) {
+		adjustFontSizeToFit = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"adjustFontSizeToFit", prefsKey)) boolValue];
+	}	
 
 	if (CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontWeight", prefsKey))) {
 		fontWeight = [(id)CFBridgingRelease(CFPreferencesCopyAppValue((CFStringRef)@"fontWeight", prefsKey)) intValue];
